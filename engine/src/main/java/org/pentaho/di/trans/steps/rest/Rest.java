@@ -373,7 +373,7 @@ public class Rest extends BaseStep implements StepInterface {
 		KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
 		kmf.init(identityKeyStore, trustStorePassword.toCharArray());
 	   
-
+ 
 	    SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
 	    sslContext.init( kmf.getKeyManagers(), tmf.getTrustManagers(), null);
 
