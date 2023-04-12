@@ -53,6 +53,7 @@ import org.pentaho.di.trans.step.StepMeta;
 import org.pentaho.di.trans.step.StepMetaInterface;
 
 import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.TrustManagerFactory;
@@ -67,6 +68,7 @@ import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.util.List;
 
@@ -119,7 +121,8 @@ public class Rest extends BaseStep implements StepInterface {
       MessageBodyWriter<String> stringMessageBodyWriter = new StringMessageBodyWriter();
       data.config.getSingletons().add( stringMessageBodyWriter );
       // create an instance of the com.sun.jersey.api.client.Client class
-      client = ApacheHttpClient4.create( data.config );
+      client = Client.create(data.config); 
+
       if ( data.basicAuthentication != null ) {
         client.addFilter( data.basicAuthentication );
       }
@@ -311,14 +314,8 @@ public class Rest extends BaseStep implements StepInterface {
       }
       // SSL TRUST STORE CONFIGURATION
       if ( !Utils.isEmpty( data.trustStoreFile ) ) {
-        try ( FileInputStream trustFileStream = new FileInputStream( data.trustStoreFile ) ) {
-          KeyStore trustStore = KeyStore.getInstance( "JKS" );
-          trustStore.load( trustFileStream, data.trustStorePassword.toCharArray() );
-          TrustManagerFactory tmf = TrustManagerFactory.getInstance( "SunX509" );
-          tmf.init( trustStore );
-
-          SSLContext ctx = SSLContext.getInstance( "SSL" );
-          ctx.init( null, tmf.getTrustManagers(), null );
+        try {		
+          SSLContext ctx = getSslContextWithTrustStoreFile(data.trustStoreFile,data.trustStorePassword);
 
           HostnameVerifier hv = new HostnameVerifier() {
             public boolean verify( String hostname, SSLSession session ) {
@@ -329,9 +326,13 @@ public class Rest extends BaseStep implements StepInterface {
             }
           };
           data.config.getProperties().put( HTTPSProperties.PROPERTY_HTTPS_PROPERTIES, new HTTPSProperties( hv, ctx ) );
+      
+          
         } catch ( NoSuchAlgorithmException e ) {
           throw new KettleException( BaseMessages.getString( PKG, "Rest.Error.NoSuchAlgorithm" ), e );
         } catch ( KeyStoreException e ) {
+          throw new KettleException( BaseMessages.getString( PKG, "Rest.Error.KeyStoreException" ), e );
+        } catch ( UnrecoverableKeyException e ) {
           throw new KettleException( BaseMessages.getString( PKG, "Rest.Error.KeyStoreException" ), e );
         } catch ( CertificateException e ) {
           throw new KettleException( BaseMessages.getString( PKG, "Rest.Error.CertificateException" ), e );
@@ -345,7 +346,42 @@ public class Rest extends BaseStep implements StepInterface {
       }
     }
   }
+  
+  
+  public static SSLContext getSslContextWithTrustStoreFile(String trustFile, String trustStorePassword) throws NoSuchAlgorithmException, KeyStoreException, IOException, CertificateException, KeyManagementException, UnrecoverableKeyException {
 
+      FileInputStream trustFileStream = new FileInputStream( trustFile );
+      FileInputStream keyStoreFileStream = new FileInputStream( trustFile );
+	  
+	  
+	  TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+	    // Using null here initialises the TMF with the default trust store.
+	    tmf.init((KeyStore) null);
+
+	    // Load the trustStore which needs to be imported
+	    KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
+	    trustStore.load(trustFileStream, trustStorePassword.toCharArray());
+	    trustFileStream.close();
+	    
+	    
+	    tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+	    tmf.init(trustStore);
+
+
+		KeyStore identityKeyStore = KeyStore.getInstance(KeyStore.getDefaultType());		    
+		identityKeyStore.load(keyStoreFileStream, trustStorePassword.toCharArray());
+		KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+		kmf.init(identityKeyStore, trustStorePassword.toCharArray());
+	   
+
+	    SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
+	    sslContext.init( kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+
+	    return sslContext;
+	  }
+
+  
+  
   protected MultivaluedMap<String, String> searchForHeaders( ClientResponse response ) {
     return response.getHeaders();
   }
